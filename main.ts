@@ -1,10 +1,10 @@
 import { Editor, MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { CHAT_VIEW_TYPE, GeminiRAGSettings, DEFAULT_SETTINGS, DocumentChunk, EmbeddingData } from './types';
-import { RAGSearchModal } from './rag-search-modal';
-import { ChatView } from './chat-view';
-import { GeminiRAGSettingTab } from './settings-tab';
-import { EmbeddingUtils } from './embedding-utils';
+import { CHAT_VIEW_TYPE, GeminiRAGSettings, DEFAULT_SETTINGS, DocumentChunk, EmbeddingData } from './src/types';
+import { RAGSearchModal } from './src/rag-search-modal';
+import { ChatView } from './src/chat-view';
+import { GeminiRAGSettingTab } from './src/settings-tab';
+import { EmbeddingUtils } from './src/embedding-utils';
 
 export default class GeminiRAGPlugin extends Plugin {
 	settings: GeminiRAGSettings;

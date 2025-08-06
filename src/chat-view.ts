@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer } from 'obsidian';
 import { CHAT_VIEW_TYPE, ChatMessage } from './types';
-import type GeminiRAGPlugin from './main';
+import type GeminiRAGPlugin from '../main';
 
 export class ChatView extends ItemView {
 	plugin: GeminiRAGPlugin;

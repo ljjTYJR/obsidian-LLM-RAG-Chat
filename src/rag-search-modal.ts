@@ -1,6 +1,6 @@
 import { App, Modal, MarkdownRenderer } from 'obsidian';
 import { DocumentChunk } from './types';
-import type GeminiRAGPlugin from './main';
+import type GeminiRAGPlugin from '../main';
 
 export class RAGSearchModal extends Modal {
 	plugin: GeminiRAGPlugin;

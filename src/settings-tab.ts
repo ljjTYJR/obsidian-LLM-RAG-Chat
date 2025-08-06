@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import type GeminiRAGPlugin from './main';
+import type GeminiRAGPlugin from '../main';
 
 export class GeminiRAGSettingTab extends PluginSettingTab {
 	plugin: GeminiRAGPlugin;
