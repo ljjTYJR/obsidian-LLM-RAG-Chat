@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-llmtalk",
 	"version": "1.0.0",
-	"description": "An Obsidian plugin for interacting with Large Language Models",
+	"description": "Talk to the LLM (Google Gemini) with your Obsidian vault using RAG (Retrieval-Augmented Generation).",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

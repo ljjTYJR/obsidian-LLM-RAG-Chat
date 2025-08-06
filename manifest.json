@@ -3,7 +3,7 @@
 	"name": "LLM RAG Chat",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "RAG plugin using Google Gemini to search and query your Obsidian vault with AI-powered embeddings.",
+	"description": "Talk to the LLM (Google Gemini) with your Obsidian vault using RAG (Retrieval-Augmented Generation).",
 	"author": "Shuo Sun",
 	"authorUrl": "Shuo Sun",
 	"isDesktopOnly": false
