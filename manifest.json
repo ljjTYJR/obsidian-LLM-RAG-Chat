@@ -1,11 +1,10 @@
 {
-	"id": "gemini-rag-plugin",
-	"name": "Gemini RAG Plugin",
+	"id": "llm_rag_chat",
+	"name": "LLM RAG Chat",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "RAG plugin using Google Gemini to search and query your Obsidian vault with AI-powered embeddings.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"author": "Shuo Sun",
+	"authorUrl": "Shuo Sun",
 	"isDesktopOnly": false
 }
