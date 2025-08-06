@@ -13,7 +13,7 @@ export interface GeminiRAGSettings {
 export const DEFAULT_SETTINGS: GeminiRAGSettings = {
 	apiKey: '',
 	embeddingModel: 'text-embedding-004',
-	generativeModel: 'gemini-1.5-flash',
+	generativeModel: 'gemini-1.5-flash-latest',
 	maxResults: 5,
 	similarityThreshold: 0.7,
 	chunkSize: 1000,

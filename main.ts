@@ -1,19 +1,29 @@
 import { Editor, MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { CHAT_VIEW_TYPE, GeminiRAGSettings, DEFAULT_SETTINGS, DocumentChunk, EmbeddingData } from './src/types';
+import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { MemoryVectorStore } from 'langchain/vectorstores/memory';
+import { Document } from '@langchain/core/documents';
+import { createRetrievalChain } from 'langchain/chains/retrieval';
+import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+import { CHAT_VIEW_TYPE, GeminiRAGSettings, DEFAULT_SETTINGS, DocumentChunk } from './src/types';
 import { RAGSearchModal } from './src/rag-search-modal';
 import { ChatView } from './src/chat-view';
 import { GeminiRAGSettingTab } from './src/settings-tab';
-import { EmbeddingUtils } from './src/embedding-utils';
 
 export default class GeminiRAGPlugin extends Plugin {
 	settings: GeminiRAGSettings;
-	genAI: GoogleGenerativeAI | null = null;
-	embeddingCache: Map<string, EmbeddingData> = new Map();
+	embeddings: GoogleGenerativeAIEmbeddings | null = null;
+	llm: ChatGoogleGenerativeAI | null = null;
+	vectorStore: MemoryVectorStore | null = null;
+	ragChain: any = null;
 	statusBarItem: HTMLElement;
+	textSplitter: RecursiveCharacterTextSplitter;
+	embeddingCache: Map<string, any> = new Map(); // For compatibility
 
 	async onload() {
 		await this.loadSettings();
+		await this.forceRefreshSettings();
 
 		// Register the chat view
 		this.registerView(
@@ -78,17 +88,31 @@ export default class GeminiRAGPlugin extends Plugin {
 		// Add settings tab
 		this.addSettingTab(new GeminiRAGSettingTab(this.app, this));
 
-		// Load existing embeddings
-		await this.loadEmbeddingsFromCache();
 	}
 
 	onunload() {
-		this.saveEmbeddingsToCache();
+		// Cleanup if needed
 	}
 
 	initializeGemini() {
 		if (this.settings.apiKey) {
-			this.genAI = new GoogleGenerativeAI(this.settings.apiKey);
+			this.embeddings = new GoogleGenerativeAIEmbeddings({
+				apiKey: this.settings.apiKey,
+				model: this.settings.embeddingModel,
+				maxRetries: 3,
+				maxConcurrency: 1
+			});
+			this.llm = new ChatGoogleGenerativeAI({
+				apiKey: this.settings.apiKey,
+				model: this.settings.generativeModel,
+				maxRetries: 3,
+				temperature: 0.1,
+				maxOutputTokens: 2048
+			});
+			this.textSplitter = new RecursiveCharacterTextSplitter({
+				chunkSize: this.settings.chunkSize,
+				chunkOverlap: this.settings.chunkOverlap
+			});
 			this.updateStatusBar('Gemini Ready');
 		} else {
 			this.updateStatusBar('API Key Required');
@@ -102,7 +126,7 @@ export default class GeminiRAGPlugin extends Plugin {
 	}
 
 	async openRAGSearchModal() {
-		if (!this.genAI) {
+		if (!this.embeddings || !this.llm) {
 			new Notice('Please configure your Gemini API key in settings');
 			return;
 		}
@@ -111,7 +135,7 @@ export default class GeminiRAGPlugin extends Plugin {
 
 
 	async activateChatView() {
-		if (!this.genAI) {
+		if (!this.embeddings || !this.llm) {
 			new Notice('Please configure your Gemini API key in settings');
 			return;
 		}
@@ -139,7 +163,7 @@ export default class GeminiRAGPlugin extends Plugin {
 	}
 
 	async rebuildEmbeddings() {
-		if (!this.genAI) {
+		if (!this.embeddings || !this.llm) {
 			new Notice('Please configure your Gemini API key in settings');
 			return;
 		}
@@ -149,17 +173,43 @@ export default class GeminiRAGPlugin extends Plugin {
 
 		try {
 			const markdownFiles = this.app.vault.getMarkdownFiles();
-			let processedFiles = 0;
+			const documents: Document[] = [];
 
 			for (const file of markdownFiles) {
-				await this.processFileForEmbeddings(file);
-				processedFiles++;
-				this.updateStatusBar(`Processing: ${processedFiles}/${markdownFiles.length}`);
+				const content = await this.app.vault.read(file);
+				const chunks = await this.textSplitter.splitText(content);
+				
+				for (const chunk of chunks) {
+					documents.push(new Document({
+						pageContent: chunk,
+						metadata: { source: file.path, fileName: file.name }
+					}));
+				}
 			}
 
-			await this.saveEmbeddingsToCache();
-			this.updateStatusBar(`Embeddings ready (${this.getTotalChunks()} chunks)`);
-			new Notice(`Embeddings built successfully! Processed ${processedFiles} files.`);
+			this.vectorStore = await MemoryVectorStore.fromDocuments(documents, this.embeddings);
+			
+			const prompt = ChatPromptTemplate.fromTemplate(`
+				Answer the following question based only on the provided context:
+				
+				<context>
+				{context}
+				</context>
+				
+				Question: {input}`);
+
+			const documentChain = await createStuffDocumentsChain({
+				llm: this.llm,
+				prompt,
+			});
+
+			this.ragChain = await createRetrievalChain({
+				retriever: this.vectorStore.asRetriever(),
+				combineDocsChain: documentChain,
+			});
+
+			this.updateStatusBar(`Embeddings ready (${documents.length} chunks)`);
+			new Notice(`Embeddings built successfully! Processed ${markdownFiles.length} files.`);
 		} catch (error) {
 			console.error('Error building embeddings:', error);
 			new Notice('Error building embeddings. Check console for details.');
@@ -167,101 +217,114 @@ export default class GeminiRAGPlugin extends Plugin {
 		}
 	}
 
-	async processFileForEmbeddings(file: TFile): Promise<void> {
-		if (!this.genAI) return;
-		
-		const embeddingData = await EmbeddingUtils.processFileForEmbeddings(
-			file,
-			this.app.vault,
-			this.genAI,
-			this.settings
-		);
-		
-		if (embeddingData) {
-			this.embeddingCache.set(file.path, embeddingData);
+	async queryWithRAG(query: string): Promise<string> {
+		if (!this.ragChain) {
+			new Notice('Please build embeddings first');
+			return 'Please build embeddings first using the "Rebuild Embeddings Database" command.';
 		}
+
+		return await this.retryWithFallback(async () => {
+			this.updateStatusBar('Querying...');
+			const result = await this.ragChain.invoke({ input: query });
+			this.updateStatusBar('Ready');
+			return result.answer;
+		});
 	}
 
+	async retryWithFallback<T>(operation: () => Promise<T>): Promise<T> {
+		const fallbackModels = ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-1.0-pro'];
+		
+		for (let attempt = 0; attempt < 3; attempt++) {
+			try {
+				return await operation();
+			} catch (error: any) {
+				console.error(`Attempt ${attempt + 1} failed:`, error);
+				
+				if (error.message?.includes('503') || error.message?.includes('Service Unavailable')) {
+					this.updateStatusBar(`Retrying... (${attempt + 1}/3)`);
+					
+					// Try different model on second attempt
+					if (attempt === 1 && this.llm) {
+						const fallbackModel = fallbackModels[attempt % fallbackModels.length];
+						console.log(`Switching to fallback model: ${fallbackModel}`);
+						this.llm = new ChatGoogleGenerativeAI({
+							apiKey: this.settings.apiKey,
+							model: fallbackModel,
+							maxRetries: 2,
+							temperature: 0.1,
+							maxOutputTokens: 2048
+						});
+						// Rebuild chain with new model
+						if (this.vectorStore) {
+							await this.rebuildChainWithNewModel();
+						}
+					}
+					
+					// Wait before retry with exponential backoff
+					await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 2000));
+					continue;
+				} else {
+					// Non-503 errors, handle immediately
+					let errorMessage = 'An error occurred while querying.';
+					if (error.message?.includes('401') || error.message?.includes('API key')) {
+						errorMessage = 'Invalid API key. Please check your settings.';
+						this.updateStatusBar('Invalid API Key');
+					} else if (error.message?.includes('429') || error.message?.includes('quota')) {
+						errorMessage = 'Rate limit exceeded. Please wait before trying again.';
+						this.updateStatusBar('Rate Limited');
+					} else {
+						this.updateStatusBar('Error');
+					}
+					
+					new Notice(errorMessage);
+					throw new Error(errorMessage);
+				}
+			}
+		}
+		
+		// All attempts failed
+		this.updateStatusBar('Service Unavailable');
+		const errorMessage = 'Google AI service is unavailable after multiple attempts. Please try again later.';
+		new Notice(errorMessage);
+		throw new Error(errorMessage);
+	}
 
-	async getEmbedding(text: string): Promise<number[] | null> {
-		return EmbeddingUtils.getEmbedding(text, this.genAI!, this.settings);
+	async rebuildChainWithNewModel() {
+		if (!this.llm || !this.vectorStore) return;
+		
+		const prompt = ChatPromptTemplate.fromTemplate(`
+			Answer the following question based only on the provided context:
+			
+			<context>
+			{context}
+			</context>
+			
+			Question: {input}`);
+
+		const documentChain = await createStuffDocumentsChain({
+			llm: this.llm,
+			prompt,
+		});
+
+		this.ragChain = await createRetrievalChain({
+			retriever: this.vectorStore.asRetriever(),
+			combineDocsChain: documentChain,
+		});
 	}
 
 	async searchSimilarChunks(query: string): Promise<DocumentChunk[]> {
-		if (!this.genAI) return [];
-
-		const queryEmbedding = await this.getEmbedding(query);
-		if (!queryEmbedding) return [];
-
-		return EmbeddingUtils.searchSimilarChunks(query, queryEmbedding, this.embeddingCache, this.settings);
-	}
-
-
-	async queryWithRAG(query: string): Promise<string> {
-		if (!this.genAI) {
-			throw new Error('Gemini not initialized');
-		}
-
-		const relevantChunks = await this.searchSimilarChunks(query);
-
-		if (relevantChunks.length === 0) {
-			new Notice('No relevant content found in your vault');
-			return 'No relevant content found in your vault for this query.';
-		}
-
-		const context = relevantChunks
-			.map(chunk => `From "${chunk.fileName}":\n${chunk.content}`)
-			.join('\n\n---\n\n');
-
-		const prompt = `Based on the following content from the user's Obsidian vault, please answer their question:
-
-Context:
-${context}
-
-Question: ${query}
-
-Please provide a comprehensive answer based on the provided context. If the context doesn't contain enough information to fully answer the question, mention that and provide what information is available.`;
-
-		try {
-			const model = this.genAI.getGenerativeModel({ model: this.settings.generativeModel });
-			const result = await model.generateContent(prompt);
-			const response = result.response;
-			return response.text();
-		} catch (error) {
-			console.error('Error querying Gemini:', error);
-			throw error;
-		}
+		if (!this.vectorStore) return [];
+		const docsWithScores = await this.vectorStore.similaritySearchWithScore(query, this.settings.maxResults);
+		return docsWithScores.map(([doc, score]) => ({
+			content: doc.pageContent,
+			filePath: doc.metadata.source || '',
+			fileName: doc.metadata.fileName || '',
+			similarity: Math.round((1 - score) * 100) / 100 // Convert distance to similarity score
+		}));
 	}
 
 	getTotalChunks(): number {
-		let total = 0;
-		for (const embeddingData of this.embeddingCache.values()) {
-			total += embeddingData.chunks.length;
-		}
-		return total;
-	}
-
-	async loadEmbeddingsFromCache(): Promise<void> {
-		try {
-			const cacheData = await this.loadData();
-			if (cacheData && cacheData.embeddingCache) {
-				this.embeddingCache = new Map(Object.entries(cacheData.embeddingCache));
-				this.updateStatusBar(`Loaded (${this.getTotalChunks()} chunks)`);
-			}
-		} catch (error) {
-			console.error('Error loading embeddings cache:', error);
-		}
-	}
-
-	async saveEmbeddingsToCache(): Promise<void> {
-		try {
-			const cacheData = {
-				embeddingCache: Object.fromEntries(this.embeddingCache)
-			};
-			await this.saveData(cacheData);
-		} catch (error) {
-			console.error('Error saving embeddings cache:', error);
-		}
+		return this.vectorStore?.memoryVectors?.length || 0;
 	}
 
 	async loadSettings() {
@@ -271,5 +334,15 @@ Please provide a comprehensive answer based on the provided context. If the cont
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.initializeGemini();
+	}
+
+	async forceRefreshSettings() {
+		// Force reload from defaults if settings are corrupted or outdated
+		const savedData = await this.loadData();
+		if (!savedData || !savedData.generativeModel) {
+			this.settings = { ...DEFAULT_SETTINGS };
+			await this.saveSettings();
+			console.log('Settings reset to defaults');
+		}
 	}
 }
