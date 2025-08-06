@@ -1,4 +1,6 @@
 import { Editor, MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 import { GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import { Document } from '@langchain/core/documents';
@@ -20,10 +22,14 @@ export default class GeminiRAGPlugin extends Plugin {
 	statusBarItem: HTMLElement;
 	textSplitter: RecursiveCharacterTextSplitter;
 	embeddingCache: Map<string, any> = new Map(); // For compatibility
+	embeddingsPath: string;
 
 	async onload() {
 		await this.loadSettings();
 		await this.forceRefreshSettings();
+		
+		// Set embeddings path to plugin directory
+		this.embeddingsPath = join(this.app.vault.configDir, 'plugins', 'obsidian-llmtalk', 'embeddings.json');
 
 		// Register the chat view
 		this.registerView(
@@ -114,6 +120,9 @@ export default class GeminiRAGPlugin extends Plugin {
 				chunkOverlap: this.settings.chunkOverlap
 			});
 			this.updateStatusBar('Gemini Ready');
+			
+			// Try to load existing embeddings
+			this.loadExistingEmbeddings();
 		} else {
 			this.updateStatusBar('API Key Required');
 		}
@@ -122,6 +131,13 @@ export default class GeminiRAGPlugin extends Plugin {
 	updateStatusBar(text: string) {
 		if (this.statusBarItem) {
 			this.statusBarItem.setText(`Gemini RAG: ${text}`);
+		}
+	}
+
+	async loadExistingEmbeddings() {
+		const loaded = await this.loadEmbeddings();
+		if (!loaded) {
+			this.updateStatusBar('Gemini Ready - No embeddings');
 		}
 	}
 
@@ -189,27 +205,14 @@ export default class GeminiRAGPlugin extends Plugin {
 
 			this.vectorStore = await MemoryVectorStore.fromDocuments(documents, this.embeddings);
 			
-			const prompt = ChatPromptTemplate.fromTemplate(`
-				Answer the following question based only on the provided context:
-				
-				<context>
-				{context}
-				</context>
-				
-				Question: {input}`);
-
-			const documentChain = await createStuffDocumentsChain({
-				llm: this.llm,
-				prompt,
-			});
-
-			this.ragChain = await createRetrievalChain({
-				retriever: this.vectorStore.asRetriever(),
-				combineDocsChain: documentChain,
-			});
+			// Build RAG chain
+			await this.buildRAGChain();
+			
+			// Save embeddings to disk
+			await this.saveEmbeddings();
 
 			this.updateStatusBar(`Embeddings ready (${documents.length} chunks)`);
-			new Notice(`Embeddings built successfully! Processed ${markdownFiles.length} files.`);
+			new Notice(`Embeddings built successfully! Processed ${markdownFiles.length} files and saved to disk.`);
 		} catch (error) {
 			console.error('Error building embeddings:', error);
 			new Notice('Error building embeddings. Check console for details.');
@@ -290,6 +293,65 @@ export default class GeminiRAGPlugin extends Plugin {
 	}
 
 	async rebuildChainWithNewModel() {
+		await this.buildRAGChain();
+	}
+
+	async searchSimilarChunks(query: string): Promise<DocumentChunk[]> {
+		if (!this.vectorStore) return [];
+		const docsWithScores = await this.vectorStore.similaritySearchWithScore(query, this.settings.maxResults);
+		return docsWithScores.map(([doc, score]) => ({
+			content: doc.pageContent,
+			filePath: doc.metadata.source || '',
+			fileName: doc.metadata.fileName || '',
+			similarity: Math.round((1 - score) * 100) / 100 // Convert distance to similarity score
+		}));
+	}
+
+	getTotalChunks(): number {
+		return this.vectorStore?.memoryVectors?.length || 0;
+	}
+
+	async saveEmbeddings() {
+		if (!this.vectorStore) return;
+		
+		try {
+			const vectorData = {
+				memoryVectors: this.vectorStore.memoryVectors,
+				timestamp: Date.now()
+			};
+			
+			await fs.writeFile(this.embeddingsPath, JSON.stringify(vectorData, null, 2));
+			console.log('Embeddings saved to disk');
+		} catch (error) {
+			console.error('Error saving embeddings:', error);
+		}
+	}
+
+	async loadEmbeddings(): Promise<boolean> {
+		try {
+			const data = await fs.readFile(this.embeddingsPath, 'utf-8');
+			const vectorData = JSON.parse(data);
+			
+			if (!this.embeddings) return false;
+			
+			// Create new vector store with saved data
+			this.vectorStore = new MemoryVectorStore(this.embeddings);
+			this.vectorStore.memoryVectors = vectorData.memoryVectors;
+			
+			// Rebuild the RAG chain with loaded embeddings
+			await this.buildRAGChain();
+			
+			const chunkCount = this.getTotalChunks();
+			this.updateStatusBar(`Embeddings loaded (${chunkCount} chunks)`);
+			console.log(`Embeddings loaded from disk: ${chunkCount} chunks`);
+			return true;
+		} catch (error) {
+			console.log('No existing embeddings found or error loading:', error.message);
+			return false;
+		}
+	}
+
+	async buildRAGChain() {
 		if (!this.llm || !this.vectorStore) return;
 		
 		const prompt = ChatPromptTemplate.fromTemplate(`
@@ -310,21 +372,6 @@ export default class GeminiRAGPlugin extends Plugin {
 			retriever: this.vectorStore.asRetriever(),
 			combineDocsChain: documentChain,
 		});
-	}
-
-	async searchSimilarChunks(query: string): Promise<DocumentChunk[]> {
-		if (!this.vectorStore) return [];
-		const docsWithScores = await this.vectorStore.similaritySearchWithScore(query, this.settings.maxResults);
-		return docsWithScores.map(([doc, score]) => ({
-			content: doc.pageContent,
-			filePath: doc.metadata.source || '',
-			fileName: doc.metadata.fileName || '',
-			similarity: Math.round((1 - score) * 100) / 100 // Convert distance to similarity score
-		}));
-	}
-
-	getTotalChunks(): number {
-		return this.vectorStore?.memoryVectors?.length || 0;
 	}
 
 	async loadSettings() {
