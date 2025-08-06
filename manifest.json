@@ -1,5 +1,5 @@
 {
-	"id": "llm_rag_chat",
+	"id": "llm-rag-chat",
 	"name": "LLM RAG Chat",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
