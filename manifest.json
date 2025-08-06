@@ -1,0 +1,11 @@
+{
+	"id": "gemini-rag-plugin",
+	"name": "Gemini RAG Plugin",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "RAG plugin using Google Gemini to search and query your Obsidian vault with AI-powered embeddings.",
+	"author": "Obsidian",
+	"authorUrl": "https://obsidian.md",
+	"fundingUrl": "https://obsidian.md/pricing",
+	"isDesktopOnly": false
+}
