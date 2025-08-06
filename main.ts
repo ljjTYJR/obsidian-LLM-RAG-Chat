@@ -27,7 +27,7 @@ export default class GeminiRAGPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		await this.forceRefreshSettings();
-		
+
 		// Set embeddings path to plugin directory
 		this.embeddingsPath = join(this.app.vault.configDir, 'plugins', 'obsidian-llmtalk', 'embeddings.json');
 
@@ -120,7 +120,7 @@ export default class GeminiRAGPlugin extends Plugin {
 				chunkOverlap: this.settings.chunkOverlap
 			});
 			this.updateStatusBar('Gemini Ready');
-			
+
 			// Try to load existing embeddings
 			this.loadExistingEmbeddings();
 		} else {
@@ -194,7 +194,7 @@ export default class GeminiRAGPlugin extends Plugin {
 			for (const file of markdownFiles) {
 				const content = await this.app.vault.read(file);
 				const chunks = await this.textSplitter.splitText(content);
-				
+
 				for (const chunk of chunks) {
 					documents.push(new Document({
 						pageContent: chunk,
@@ -204,10 +204,10 @@ export default class GeminiRAGPlugin extends Plugin {
 			}
 
 			this.vectorStore = await MemoryVectorStore.fromDocuments(documents, this.embeddings);
-			
+
 			// Build RAG chain
 			await this.buildRAGChain();
-			
+
 			// Save embeddings to disk
 			await this.saveEmbeddings();
 
@@ -236,16 +236,16 @@ export default class GeminiRAGPlugin extends Plugin {
 
 	async retryWithFallback<T>(operation: () => Promise<T>): Promise<T> {
 		const fallbackModels = ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-1.0-pro'];
-		
+
 		for (let attempt = 0; attempt < 3; attempt++) {
 			try {
 				return await operation();
 			} catch (error: any) {
 				console.error(`Attempt ${attempt + 1} failed:`, error);
-				
+
 				if (error.message?.includes('503') || error.message?.includes('Service Unavailable')) {
 					this.updateStatusBar(`Retrying... (${attempt + 1}/3)`);
-					
+
 					// Try different model on second attempt
 					if (attempt === 1 && this.llm) {
 						const fallbackModel = fallbackModels[attempt % fallbackModels.length];
@@ -262,7 +262,7 @@ export default class GeminiRAGPlugin extends Plugin {
 							await this.rebuildChainWithNewModel();
 						}
 					}
-					
+
 					// Wait before retry with exponential backoff
 					await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 2000));
 					continue;
@@ -278,13 +278,13 @@ export default class GeminiRAGPlugin extends Plugin {
 					} else {
 						this.updateStatusBar('Error');
 					}
-					
+
 					new Notice(errorMessage);
 					throw new Error(errorMessage);
 				}
 			}
 		}
-		
+
 		// All attempts failed
 		this.updateStatusBar('Service Unavailable');
 		const errorMessage = 'Google AI service is unavailable after multiple attempts. Please try again later.';
@@ -313,13 +313,13 @@ export default class GeminiRAGPlugin extends Plugin {
 
 	async saveEmbeddings() {
 		if (!this.vectorStore) return;
-		
+
 		try {
 			const vectorData = {
 				memoryVectors: this.vectorStore.memoryVectors,
 				timestamp: Date.now()
 			};
-			
+
 			await fs.writeFile(this.embeddingsPath, JSON.stringify(vectorData, null, 2));
 			console.log('Embeddings saved to disk');
 		} catch (error) {
@@ -331,16 +331,16 @@ export default class GeminiRAGPlugin extends Plugin {
 		try {
 			const data = await fs.readFile(this.embeddingsPath, 'utf-8');
 			const vectorData = JSON.parse(data);
-			
+
 			if (!this.embeddings) return false;
-			
+
 			// Create new vector store with saved data
 			this.vectorStore = new MemoryVectorStore(this.embeddings);
 			this.vectorStore.memoryVectors = vectorData.memoryVectors;
-			
+
 			// Rebuild the RAG chain with loaded embeddings
 			await this.buildRAGChain();
-			
+
 			const chunkCount = this.getTotalChunks();
 			this.updateStatusBar(`Embeddings loaded (${chunkCount} chunks)`);
 			console.log(`Embeddings loaded from disk: ${chunkCount} chunks`);
@@ -353,14 +353,14 @@ export default class GeminiRAGPlugin extends Plugin {
 
 	async buildRAGChain() {
 		if (!this.llm || !this.vectorStore) return;
-		
+
 		const prompt = ChatPromptTemplate.fromTemplate(`
 			Answer the following question based only on the provided context:
-			
+
 			<context>
 			{context}
 			</context>
-			
+
 			Question: {input}`);
 
 		const documentChain = await createStuffDocumentsChain({
