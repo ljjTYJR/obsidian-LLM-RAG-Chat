@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-llmtalk",
 	"version": "1.0.0",
-	"description": "Talk to the LLM (Google Gemini) with your Obsidian vault using RAG (Retrieval-Augmented Generation).",
+	"description": "Talk to the LLM (Google Gemini) with your md files in the vault using RAG (Retrieval-Augmented Generation).",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

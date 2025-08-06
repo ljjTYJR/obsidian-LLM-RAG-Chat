@@ -3,7 +3,7 @@
 	"name": "LLM RAG Chat",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Talk to the LLM (Google Gemini) with your Obsidian vault using RAG (Retrieval-Augmented Generation).",
+	"description": "Talk to the LLM (Google Gemini) with your md files in the vault using RAG (Retrieval-Augmented Generation).",
 	"author": "Shuo Sun",
 	"authorUrl": "Shuo Sun",
 	"isDesktopOnly": false
