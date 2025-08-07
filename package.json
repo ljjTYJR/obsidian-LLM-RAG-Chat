@@ -1,5 +1,5 @@
 {
-	"name": "obsidian-llmtalk",
+	"name": "llm-rag-chat",
 	"version": "1.0.0",
 	"description": "Talk to the LLM (Google Gemini) with your md files in the vault using RAG (Retrieval-Augmented Generation).",
 	"main": "main.js",
